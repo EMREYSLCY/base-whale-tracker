@@ -11,52 +11,52 @@ WHALE_THRESHOLD = 100_000 * (10 ** 6)
 
 async def fetch_receipt(tx_hash):
     try:
-        receipt = await w3.eth.get_transaction_receipt(tx_hash)
-        return receipt
+        return await w3.eth.get_transaction_receipt(tx_hash)
     except Exception:
         return None
 
-async def scan_latest_block():
-    print("Searching for the latest block on Base network (ASYNC MODE)...")
-    latest_block_number = await w3.eth.block_number
-    print(f"Latest block found: {latest_block_number}")
-    
-    block = await w3.eth.get_block(latest_block_number, full_transactions=True)
-    tx_count = len(block.transactions)
-    
-    print(f"Block {latest_block_number} contains {tx_count} transactions.")
-    print("Fetching transaction details in PARALLEL. Brace yourself...\n")
-    
-    start_time = time.time()
-    whale_count = 0
+async def scan_block(block_number):
+    print(f"Scanning Block: {block_number}")
+    block = await w3.eth.get_block(block_number, full_transactions=True)
     
     tasks = [fetch_receipt(tx.hash) for tx in block.transactions]
     receipts = await asyncio.gather(*tasks)
     
+    whale_found = 0
     for receipt in receipts:
-        if receipt is None:
-            continue
-            
+        if not receipt: continue
         for log in receipt.logs:
             if log.address.lower() == USDC_ADDRESS.lower() and log.topics[0].hex() == TRANSFER_SIG:
                 amount = int(log.data.hex(), 16)
-                
                 if amount >= WHALE_THRESHOLD:
                     actual_amount = amount / (10 ** 6)
-                    print(f"🚨 WHALE DETECTED! Amount: {actual_amount:,.2f} USDC")
-                    print(f"🔗 Tx Hash: {receipt.transactionHash.hex()}\n")
-                    whale_count += 1
-            
-    end_time = time.time()
-    print(f"Scan complete! Total {whale_count} whale transactions found.")
-    print(f"🚀 Time elapsed: {end_time - start_time:.2f} seconds")
+                    print(f"🚨 WHALE DETECTED! Block: {block_number} | Amount: {actual_amount:,.2f} USDC")
+                    print(f"🔗 https://basescan.org/tx/{receipt.transactionHash.hex()}\n")
+                    whale_found += 1
+    return whale_found
 
 async def main():
-    if await w3.is_connected():
-        print("🟢 Successfully connected to Base network (Async)!")
-        await scan_latest_block()
-    else:
-        print("🔴 Failed to connect to Base network. Check your RPC URL.")
+    if not await w3.is_connected():
+        print("🔴 Connection Failed!")
+        return
+
+    print("🟢 24/7 Whale Tracker Started on Base Network...")
+    last_scanned_block = await w3.eth.block_number
+    
+    while True:
+        try:
+            current_block = await w3.eth.block_number
+            
+            if current_block > last_scanned_block:
+                for block_to_scan in range(last_scanned_block + 1, current_block + 1):
+                    await scan_block(block_to_scan)
+                    last_scanned_block = block_to_scan
+            else:
+                await asyncio.sleep(5)
+                
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
     asyncio.run(main())
